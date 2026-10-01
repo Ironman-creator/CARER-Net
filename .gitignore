@@ -7,9 +7,12 @@ __pycache__/
 .matplotlib/
 
 data/
-weight_files*/
-runs*/
-result*/
+weight_files/
+weight_files_*/
+runs/
+runs_*/
+result/
+result_*/
 *.pth
 *.pt
 *.ckpt
