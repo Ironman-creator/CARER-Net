@@ -9,8 +9,13 @@ from tqdm import tqdm
 from data_utils import DATASET_CHOICES, RetinalDataset, discover_pairs
 from models.Attention_UNet_V5 import (
     CARERUNet,
+    ContrastOnlyColorDetailUNet,
     ColorDetailOnlyUNet,
+    GrayCLAHEUNet,
     GrayRGBControlUNet,
+    GreenChannelUNet,
+    LearnedRGBProjectionUNet,
+    RGBOnlyColorDetailUNet,
     SignedRefinerOnlyUNet,
 )
 from models.model_factory import count_parameters
@@ -40,6 +45,50 @@ MODEL_BUILDERS = {
     "color_detail_only_unet": ColorDetailOnlyUNet,
     "signed_refiner_only_unet": SignedRefinerOnlyUNet,
     "carer_unet": CARERUNet,
+    "green_channel_unet": GreenChannelUNet,
+    "gray_clahe_unet": GrayCLAHEUNet,
+    "rgb_1x1_projection_unet": LearnedRGBProjectionUNet,
+    "carer_rgb_only_unet": RGBOnlyColorDetailUNet,
+    "carer_contrast_only_unet": ContrastOnlyColorDetailUNet,
+}
+
+INPUT_MODES = {
+    "gray_rgb_control_30_unet": "gray_rgb",
+    "color_detail_only_unet": "gray_rgb",
+    "signed_refiner_only_unet": "gray_rgb",
+    "carer_unet": "gray_rgb",
+    "green_channel_unet": "gray_rgb",
+    "gray_clahe_unet": "gray_rgb_clahe",
+    "rgb_1x1_projection_unet": "gray_rgb",
+    "carer_rgb_only_unet": "gray_rgb",
+    "carer_contrast_only_unet": "gray_rgb",
+}
+
+MODULE_NAMES = {
+    "color_detail_only_unet": ("color_detail_stem",),
+    "signed_refiner_only_unet": ("error_refiner",),
+    "carer_unet": ("color_detail_stem", "error_refiner"),
+    "rgb_1x1_projection_unet": ("rgb_projection",),
+    "carer_rgb_only_unet": ("color_detail_stem",),
+    "carer_contrast_only_unet": ("color_detail_stem",),
+}
+
+RETURNS_AUX = {
+    "color_detail_only_unet",
+    "signed_refiner_only_unet",
+    "carer_unet",
+    "rgb_1x1_projection_unet",
+    "carer_rgb_only_unet",
+    "carer_contrast_only_unet",
+}
+
+BASELINE_PRESERVING = {
+    "gray_rgb_control_30_unet",
+    "color_detail_only_unet",
+    "signed_refiner_only_unet",
+    "carer_unet",
+    "carer_rgb_only_unet",
+    "carer_contrast_only_unet",
 }
 
 
@@ -92,13 +141,7 @@ def read_json(path):
 
 
 def variant_modules(model, model_name):
-    if model_name == "color_detail_only_unet":
-        return [model.color_detail_stem]
-    if model_name == "signed_refiner_only_unet":
-        return [model.error_refiner]
-    if model_name == "carer_unet":
-        return [model.color_detail_stem, model.error_refiner]
-    return []
+    return [getattr(model, name) for name in MODULE_NAMES.get(model_name, ())]
 
 
 def load_gn_weights(model, checkpoint, model_name, dataset):
@@ -119,15 +162,12 @@ def load_gn_weights(model, checkpoint, model_name, dataset):
     if config.get("input_mode", "grayscale") != "grayscale":
         raise ValueError("The ablation requires the grayscale GN checkpoint")
 
-    if model_name == "gray_rgb_control_30_unet":
+    allowed_module_names = MODULE_NAMES.get(model_name, ())
+    if not allowed_module_names:
         model.load_state_dict(checkpoint["state_dict"], strict=True)
         return []
 
-    allowed_prefixes = {
-        "color_detail_only_unet": ("color_detail_stem.",),
-        "signed_refiner_only_unet": ("error_refiner.",),
-        "carer_unet": ("color_detail_stem.", "error_refiner."),
-    }[model_name]
+    allowed_prefixes = tuple(f"{name}." for name in allowed_module_names)
     incompatibility = model.load_state_dict(checkpoint["state_dict"], strict=False)
     missing = list(incompatibility.missing_keys)
     unexpected = list(incompatibility.unexpected_keys)
@@ -140,16 +180,20 @@ def load_gn_weights(model, checkpoint, model_name, dataset):
     return missing
 
 
-def verify_initial_equivalence(control, candidates, sample):
+def measure_initial_differences(control, candidates, samples_by_mode):
     control.eval()
     with torch.inference_mode():
-        control_logits = control(sample)
         differences = {}
         for model_name, model in candidates.items():
+            sample = samples_by_mode[INPUT_MODES[model_name]]
+            # Every multi-channel representation keeps the exact original
+            # grayscale image in channel zero, so the reference FOV and GN
+            # control remain identical across all five experiment arms.
+            control_logits = control(sample[:, :4])
             model.eval()
             candidate_logits = model(sample)
             difference = (control_logits - candidate_logits).abs().max().item()
-            if difference > 1e-6:
+            if model_name in BASELINE_PRESERVING and difference > 1e-6:
                 raise RuntimeError(
                     f"{model_name} is not baseline preserving: max difference={difference}"
                 )
@@ -201,7 +245,7 @@ def save_checkpoint(path, model, model_name, epoch, metrics, config, dataset):
             "validation_loss": metrics["validation_loss"],
             "selection_metric": "soft_dice",
             "selection_value": metrics["validation_soft_dice"],
-            "input_mode": "gray_rgb",
+            "input_mode": INPUT_MODES[model_name],
             "config": config,
         },
         path,
@@ -232,7 +276,8 @@ def train_variant(
     run_dir.mkdir(parents=True, exist_ok=True)
     args.weight_dir.mkdir(parents=True, exist_ok=True)
 
-    is_candidate = model_name != "gray_rgb_control_30_unet"
+    has_new_module = bool(variant_modules(model, model_name))
+    returns_aux = model_name in RETURNS_AUX
     has_refiner = model_name in {"signed_refiner_only_unet", "carer_unet"}
     config = {
         "dataset": args.dataset,
@@ -242,12 +287,12 @@ def train_variant(
         "run_root": str(args.run_root.resolve()),
         "weight_dir": str(args.weight_dir.resolve()),
         "image_size": args.image_size,
-        "input_mode": "gray_rgb",
+        "input_mode": INPUT_MODES[model_name],
         "epochs": args.epochs,
-        "warmup_epochs": args.warmup_epochs if is_candidate else 0,
-        "tail_start_epoch": args.warmup_epochs + 1 if is_candidate else 1,
+        "warmup_epochs": args.warmup_epochs if has_new_module else 0,
+        "tail_start_epoch": args.warmup_epochs + 1 if has_new_module else 1,
         "batch_size": args.batch_size,
-        "head_learning_rate": args.head_learning_rate if is_candidate else None,
+        "head_learning_rate": args.head_learning_rate if has_new_module else None,
         "tail_learning_rate": args.tail_learning_rate,
         "base_loss_weight": args.base_loss_weight if has_refiner else 0.0,
         "error_loss_weight": args.error_loss_weight if has_refiner else 0.0,
@@ -270,7 +315,7 @@ def train_variant(
     write_json(run_dir / "split.json", split_record)
 
     criterion = BCEDiceLoss()
-    initial_phase = "head_warmup" if is_candidate else "tail"
+    initial_phase = "head_warmup" if has_new_module else "tail"
     configure_trainable_parameters(model, model_name, initial_phase)
     optimizer = build_optimizer(
         model, model_name, args.head_learning_rate, args.tail_learning_rate
@@ -279,7 +324,7 @@ def train_variant(
         validation_dataset, args.batch_size, args.workers, args.train_seed + 900000, False
     )
     initial_metrics, _ = validation_metrics(
-        model, validation_loader, criterion, device, is_candidate
+        model, validation_loader, criterion, device, returns_aux
     )
     best_metrics = dict(initial_metrics)
     best_epoch = 0
@@ -300,7 +345,7 @@ def train_variant(
             "mean_abs_logit_delta": 0.0,
             **initial_metrics,
             "tail_learning_rate": args.tail_learning_rate,
-            "head_learning_rate": args.head_learning_rate if is_candidate else 0.0,
+            "head_learning_rate": args.head_learning_rate if has_new_module else 0.0,
             "is_best": 1,
         }
     ]
@@ -311,7 +356,11 @@ def train_variant(
     )
 
     for epoch in range(1, args.epochs + 1):
-        phase = "head_warmup" if is_candidate and epoch <= args.warmup_epochs else "tail"
+        phase = (
+            "head_warmup"
+            if has_new_module and epoch <= args.warmup_epochs
+            else "tail"
+        )
         configure_trainable_parameters(model, model_name, phase)
         model.train()
         epoch_seed = args.train_seed * 10000 + epoch
@@ -335,7 +384,7 @@ def train_variant(
             masks = masks.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
 
-            if is_candidate:
+            if returns_aux:
                 logits, auxiliary = model(images, return_aux=True)
                 final_loss = criterion(logits, masks)
                 base_loss = criterion(auxiliary["base_logits"], masks)
@@ -383,7 +432,7 @@ def train_variant(
             validation_dataset, args.batch_size, args.workers, args.train_seed + 900000, False
         )
         metrics, _ = validation_metrics(
-            model, validation_loader, criterion, device, is_candidate
+            model, validation_loader, criterion, device, returns_aux
         )
         improved = metrics["validation_soft_dice"] > best_score
         if improved:
@@ -407,7 +456,7 @@ def train_variant(
                 "mean_abs_logit_delta": sums["logit_delta"] / sample_count,
                 **metrics,
                 "tail_learning_rate": args.tail_learning_rate,
-                "head_learning_rate": args.head_learning_rate if is_candidate else 0.0,
+                "head_learning_rate": args.head_learning_rate if has_new_module else 0.0,
                 "is_best": int(improved),
             }
         )
@@ -425,7 +474,7 @@ def train_variant(
         validation_dataset, args.batch_size, args.workers, args.train_seed + 900000, False
     )
     confirmed_metrics, per_image_rows = validation_metrics(
-        model, validation_loader, criterion, device, is_candidate, include_rows=True
+        model, validation_loader, criterion, device, returns_aux, include_rows=True
     )
     write_csv(per_image_path, per_image_rows)
     best_metrics.update(confirmed_metrics)
@@ -441,7 +490,7 @@ def train_variant(
         "checkpoint": str(checkpoint_path.resolve()),
         "official_test_accessed": False,
     }
-    if is_candidate:
+    if returns_aux:
         result["raw_validation_dice_at_best"] = best_metrics["raw_validation_dice"]
         result["raw_validation_soft_dice_at_best"] = best_metrics[
             "raw_validation_soft_dice"
@@ -466,18 +515,23 @@ def main():
     train_pairs, validation_pairs, split_record = load_explicit_split(
         all_pairs, args.split_file, args.dataset
     )
-    train_dataset = RetinalDataset(
-        train_pairs, args.image_size, input_mode="gray_rgb", augment=True
-    )
-    validation_dataset = RetinalDataset(
-        validation_pairs, args.image_size, input_mode="gray_rgb", augment=False
-    )
     checkpoint = load_torch_checkpoint(args.initial_checkpoint)
     checkpoint_hash = file_sha256(args.initial_checkpoint)
 
     variant_names = list(dict.fromkeys(args.variants))
-    if "gray_rgb_control_30_unet" not in variant_names:
-        raise ValueError("--variants must include gray_rgb_control_30_unet")
+    input_modes = sorted({INPUT_MODES[name] for name in variant_names} | {"gray_rgb"})
+    train_datasets = {
+        mode: RetinalDataset(
+            train_pairs, args.image_size, input_mode=mode, augment=True
+        )
+        for mode in input_modes
+    }
+    validation_datasets = {
+        mode: RetinalDataset(
+            validation_pairs, args.image_size, input_mode=mode, augment=False
+        )
+        for mode in input_modes
+    }
     models = {}
     for model_name in variant_names:
         set_seed(args.train_seed)
@@ -489,16 +543,18 @@ def main():
             model, checkpoint, model_name, args.dataset
         )
 
-    equivalence_loader = make_loader(
-        validation_dataset, 1, 0, args.train_seed + 700000, False
+    set_seed(args.train_seed)
+    control = GrayRGBControlUNet()
+    load_gn_weights(
+        control, checkpoint, "gray_rgb_control_30_unet", args.dataset
     )
-    sample, _, _ = next(iter(equivalence_loader))
-    sample = sample[:, :, :128, :128]
-    differences = verify_initial_equivalence(
-        models["gray_rgb_control_30_unet"],
-        {key: value for key, value in models.items() if key != "gray_rgb_control_30_unet"},
-        sample,
-    )
+    samples_by_mode = {}
+    for mode, dataset in validation_datasets.items():
+        loader = make_loader(dataset, 1, 0, args.train_seed + 700000, False)
+        sample, _, _ = next(iter(loader))
+        samples_by_mode[mode] = sample[:, :, :128, :128]
+    differences = measure_initial_differences(control, models, samples_by_mode)
+    del control
 
     print(f"Device: {device}")
     print(f"Explicit split: train={len(train_pairs)}, validation={len(validation_pairs)}")
@@ -515,11 +571,12 @@ def main():
     results = {}
     for model_name in variant_names:
         model = models.pop(model_name).to(device)
+        input_mode = INPUT_MODES[model_name]
         results[model_name] = train_variant(
             model,
             model_name,
-            train_dataset,
-            validation_dataset,
+            train_datasets[input_mode],
+            validation_datasets[input_mode],
             split_record,
             args,
             device,

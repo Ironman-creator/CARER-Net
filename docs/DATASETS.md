@@ -36,7 +36,7 @@ data/
 For FIVES, `prepare_fives.py` can copy the official `train/Original`, `train/Ground truth`, `test/Original`, and `test/Ground truth` folders into the normalized layout:
 
 ```bash
-python prepare_fives.py --source "/path/to/FIVES_official" --destination data/FIVES
+python prepare_fives.py --source "/path/to/FIVES_official" --data-root data
 ```
 
 Do not commit `data/` to Git. The repository `.gitignore` excludes it.

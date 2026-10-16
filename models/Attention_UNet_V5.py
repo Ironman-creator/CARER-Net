@@ -17,14 +17,76 @@ class GrayRGBControlUNet(ImprovedAttentionUNetV2):
         return super().forward(inputs[:, :1])
 
 
+class GreenChannelUNet(ImprovedAttentionUNetV2):
+    """Fixed green-channel input with the unchanged one-channel GN backbone."""
+
+    def __init__(self, out_channels=1):
+        super().__init__(in_channels=1, out_channels=out_channels, use_msff=False)
+
+    def forward(self, inputs):
+        if inputs.ndim != 4 or inputs.shape[1] != 4:
+            raise ValueError("GreenChannelUNet expects [gray, R, G, B] input")
+        return super().forward(inputs[:, 2:3])
+
+
+class GrayCLAHEUNet(ImprovedAttentionUNetV2):
+    """Fixed CLAHE input while retaining original grayscale for FOV evaluation."""
+
+    def __init__(self, out_channels=1):
+        super().__init__(in_channels=1, out_channels=out_channels, use_msff=False)
+
+    def forward(self, inputs):
+        if inputs.ndim != 4 or inputs.shape[1] != 5:
+            raise ValueError(
+                "GrayCLAHEUNet expects [gray, R, G, B, gray_CLAHE] input"
+            )
+        return super().forward(inputs[:, 4:5])
+
+
+class LearnedRGBProjectionUNet(ImprovedAttentionUNetV2):
+    """Generic learnable 1x1 RGB-to-grayscale projection control."""
+
+    def __init__(self, out_channels=1):
+        super().__init__(in_channels=1, out_channels=out_channels, use_msff=False)
+        self.rgb_projection = nn.Conv2d(3, 1, 1, bias=True)
+        with torch.no_grad():
+            self.rgb_projection.weight.copy_(
+                torch.tensor([0.299, 0.587, 0.114], dtype=torch.float32).view(1, 3, 1, 1)
+            )
+            self.rgb_projection.bias.zero_()
+
+    def forward(self, inputs, return_aux=False):
+        if inputs.ndim != 4 or inputs.shape[1] != 4:
+            raise ValueError(
+                "LearnedRGBProjectionUNet expects [gray, R, G, B] input"
+            )
+        grayscale = inputs[:, :1]
+        projected = self.rgb_projection(inputs[:, 1:4])
+        logits = super().forward(projected)
+        if not return_aux:
+            return logits
+        return logits, {
+            "base_logits": logits,
+            "input_delta": projected - grayscale,
+            "logit_delta": torch.zeros_like(logits),
+        }
+
+
 class ColorDetailStem(nn.Module):
     """Learn a bounded correction to the exact grayscale baseline input."""
 
-    def __init__(self, feature_channels=24):
+    def __init__(self, feature_channels=24, use_rgb=True, use_local_contrast=True):
         super().__init__()
+        if not use_rgb and not use_local_contrast:
+            raise ValueError("ColorDetailStem requires at least one input cue")
+        self.use_rgb = bool(use_rgb)
+        self.use_local_contrast = bool(use_local_contrast)
+        input_channels = (3 if self.use_rgb else 0) + (
+            1 if self.use_local_contrast else 0
+        )
         groups = group_count(feature_channels)
         self.features = nn.Sequential(
-            nn.Conv2d(4, feature_channels, 3, padding=1, bias=False),
+            nn.Conv2d(input_channels, feature_channels, 3, padding=1, bias=False),
             nn.GroupNorm(groups, feature_channels),
             nn.SiLU(inplace=True),
             nn.Conv2d(
@@ -51,13 +113,18 @@ class ColorDetailStem(nn.Module):
         local_contrast = green - F.avg_pool2d(
             green, kernel_size=9, stride=1, padding=4
         )
-        features = self.features(torch.cat([rgb, local_contrast], dim=1))
+        cues = []
+        if self.use_rgb:
+            cues.append(rgb)
+        if self.use_local_contrast:
+            cues.append(local_contrast)
+        features = self.features(torch.cat(cues, dim=1))
         adjusted_grayscale = grayscale + 0.1 * torch.tanh(self.input_delta(features))
         return adjusted_grayscale, features
 
 
 class SignedErrorRefiner(nn.Module):
-    """Predict separate false-negative recovery and false-positive suppression maps."""
+    """Predict two unconstrained residual responses with FN/FP auxiliary supervision."""
 
     def __init__(self, detail_channels=24, hidden_channels=32):
         super().__init__()
@@ -205,6 +272,30 @@ class ColorDetailOnlyUNet(ImprovedAttentionUNetV2):
             "input_delta": grayscale - inputs[:, :1],
             "logit_delta": torch.zeros_like(logits),
         }
+
+
+class RGBOnlyColorDetailUNet(ColorDetailOnlyUNet):
+    """CARER-Core ablation using RGB cues without local green contrast."""
+
+    def __init__(self, out_channels=1, detail_channels=24):
+        ImprovedAttentionUNetV2.__init__(
+            self, in_channels=1, out_channels=out_channels, use_msff=False
+        )
+        self.color_detail_stem = ColorDetailStem(
+            detail_channels, use_rgb=True, use_local_contrast=False
+        )
+
+
+class ContrastOnlyColorDetailUNet(ColorDetailOnlyUNet):
+    """CARER-Core ablation using local green contrast without full RGB."""
+
+    def __init__(self, out_channels=1, detail_channels=24):
+        ImprovedAttentionUNetV2.__init__(
+            self, in_channels=1, out_channels=out_channels, use_msff=False
+        )
+        self.color_detail_stem = ColorDetailStem(
+            detail_channels, use_rgb=False, use_local_contrast=True
+        )
 
 
 class SignedRefinerOnlyUNet(ImprovedAttentionUNetV2):

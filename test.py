@@ -29,7 +29,9 @@ def parse_args():
     parser.add_argument("--result-root", type=Path, default=PROJECT_ROOT / "result")
     parser.add_argument("--image-size", type=int, default=512)
     parser.add_argument(
-        "--input-mode", choices=("grayscale", "green", "gray_rgb"), default="grayscale"
+        "--input-mode",
+        choices=("grayscale", "green", "gray_rgb", "gray_rgb_clahe"),
+        default="grayscale",
     )
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument(
@@ -49,12 +51,6 @@ def parse_args():
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--allow-partial-checkpoint", action="store_true")
     parser.add_argument("--save-probabilities", action="store_true")
-    parser.add_argument(
-        "--warmup-iterations",
-        type=int,
-        default=5,
-        help="Unmeasured forward passes before CUDA timing.",
-    )
     return parser.parse_args()
 
 
@@ -220,25 +216,26 @@ def main():
         "carer_unet",
         "color_detail_only_unet",
         "signed_refiner_only_unet",
+        "green_channel_unet",
+        "rgb_1x1_projection_unet",
+        "carer_rgb_only_unet",
+        "carer_contrast_only_unet",
     }
     if args.model in gray_rgb_models and args.input_mode != "gray_rgb":
         raise ValueError(f"Model {args.model} requires --input-mode gray_rgb")
     if args.input_mode == "gray_rgb" and args.model not in gray_rgb_models:
         raise ValueError("--input-mode gray_rgb is reserved for the CARER paired models")
-    input_channels = 4 if args.input_mode == "gray_rgb" else 1
+    if args.model == "gray_clahe_unet" and args.input_mode != "gray_rgb_clahe":
+        raise ValueError("Model gray_clahe_unet requires --input-mode gray_rgb_clahe")
+    if args.input_mode == "gray_rgb_clahe" and args.model != "gray_clahe_unet":
+        raise ValueError("--input-mode gray_rgb_clahe is reserved for gray_clahe_unet")
+    input_channels = {
+        "gray_rgb": 4,
+        "gray_rgb_clahe": 5,
+    }.get(args.input_mode, 1)
     model = build_model(args.model, in_channels=input_channels, out_channels=1).to(device)
     load_checkpoint(model, checkpoint_path, device, args.allow_partial_checkpoint)
     model.eval()
-
-    if args.warmup_iterations < 0:
-        raise ValueError("--warmup-iterations cannot be negative")
-    if len(dataset) and args.warmup_iterations:
-        warmup_image = dataset[0][0].unsqueeze(0).to(device)
-        with torch.inference_mode():
-            for _ in range(args.warmup_iterations):
-                model(warmup_image)
-        if device.type == "cuda":
-            torch.cuda.synchronize()
 
     selected_threshold = args.threshold
     threshold_selection = None
@@ -320,7 +317,6 @@ def main():
         "threshold_selection": threshold_selection,
         "fov": args.fov,
         "parameter_count": count_parameters(model),
-        "timing_warmup_iterations": args.warmup_iterations,
         "metrics": summary,
     }
 

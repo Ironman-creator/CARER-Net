@@ -34,7 +34,9 @@ def parse_args():
     parser.add_argument("--weight-dir", type=Path, default=PROJECT_ROOT / "weight_files")
     parser.add_argument("--image-size", type=int, default=512)
     parser.add_argument(
-        "--input-mode", choices=("grayscale", "green", "gray_rgb"), default="grayscale"
+        "--input-mode",
+        choices=("grayscale", "green", "gray_rgb", "gray_rgb_clahe"),
+        default="grayscale",
     )
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=1)
@@ -492,12 +494,23 @@ def main():
         "carer_unet",
         "color_detail_only_unet",
         "signed_refiner_only_unet",
+        "green_channel_unet",
+        "rgb_1x1_projection_unet",
+        "carer_rgb_only_unet",
+        "carer_contrast_only_unet",
     }
     if args.model in gray_rgb_models and args.input_mode != "gray_rgb":
         raise ValueError(f"Model {args.model} requires --input-mode gray_rgb")
     if args.input_mode == "gray_rgb" and args.model not in gray_rgb_models:
         raise ValueError("--input-mode gray_rgb is reserved for the CARER paired models")
-    input_channels = 4 if args.input_mode == "gray_rgb" else 1
+    if args.model == "gray_clahe_unet" and args.input_mode != "gray_rgb_clahe":
+        raise ValueError("Model gray_clahe_unet requires --input-mode gray_rgb_clahe")
+    if args.input_mode == "gray_rgb_clahe" and args.model != "gray_clahe_unet":
+        raise ValueError("--input-mode gray_rgb_clahe is reserved for gray_clahe_unet")
+    input_channels = {
+        "gray_rgb": 4,
+        "gray_rgb_clahe": 5,
+    }.get(args.input_mode, 1)
     model = build_model(args.model, in_channels=input_channels, out_channels=1).to(device)
     criterion = build_criterion(
         args.loss,

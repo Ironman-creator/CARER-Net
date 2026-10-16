@@ -22,3 +22,9 @@ result_*/
 Thumbs.db
 .idea/
 .vscode/
+
+artifacts/
+.env
+.env.*
+*.pem
+*.key

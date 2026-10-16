@@ -5,6 +5,11 @@ from models.Attention_UNet_V3 import DCOAAttentionUNet
 from models.Attention_UNet_V4 import ConnectivityAuxiliaryUNet
 from models.Attention_UNet_V5 import (
     CARERUNet,
+    ContrastOnlyColorDetailUNet,
+    GrayCLAHEUNet,
+    GreenChannelUNet,
+    LearnedRGBProjectionUNet,
+    RGBOnlyColorDetailUNet,
     ColorDetailOnlyUNet,
     GrayRGBControlUNet,
     SignedRefinerOnlyUNet,
@@ -27,6 +32,11 @@ MODEL_CHOICES = (
     "carer_unet",
     "color_detail_only_unet",
     "signed_refiner_only_unet",
+    "green_channel_unet",
+    "gray_clahe_unet",
+    "rgb_1x1_projection_unet",
+    "carer_rgb_only_unet",
+    "carer_contrast_only_unet",
     "msff_no_k1",
     "msff_no_k3",
     "msff_no_k5",
@@ -50,6 +60,11 @@ MODEL_TAGS = {
     "carer_unet": "CARERUNet",
     "color_detail_only_unet": "ColorDetailOnlyUNet",
     "signed_refiner_only_unet": "SignedRefinerOnlyUNet",
+    "green_channel_unet": "GreenChannelUNet",
+    "gray_clahe_unet": "GrayCLAHEUNet",
+    "rgb_1x1_projection_unet": "RGB1x1ProjectionUNet",
+    "carer_rgb_only_unet": "CARERRGBOnlyUNet",
+    "carer_contrast_only_unet": "CARERContrastOnlyUNet",
     "msff_no_k1": "ImprovedAttentionUNet_NoK1",
     "msff_no_k3": "ImprovedAttentionUNet_NoK3",
     "msff_no_k5": "ImprovedAttentionUNet_NoK5",
@@ -84,6 +99,16 @@ def build_model(name, in_channels=1, out_channels=1):
         return ColorDetailOnlyUNet(out_channels=out_channels)
     if name == "signed_refiner_only_unet":
         return SignedRefinerOnlyUNet(out_channels=out_channels)
+    if name == "green_channel_unet":
+        return GreenChannelUNet(out_channels=out_channels)
+    if name == "gray_clahe_unet":
+        return GrayCLAHEUNet(out_channels=out_channels)
+    if name == "rgb_1x1_projection_unet":
+        return LearnedRGBProjectionUNet(out_channels=out_channels)
+    if name == "carer_rgb_only_unet":
+        return RGBOnlyColorDetailUNet(out_channels=out_channels)
+    if name == "carer_contrast_only_unet":
+        return ContrastOnlyColorDetailUNet(out_channels=out_channels)
     if name == "msff_no_k1":
         return ImprovedAttentionUNet(in_channels, out_channels, msff_kernels=(3, 5))
     if name == "msff_no_k3":

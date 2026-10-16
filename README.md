@@ -1,18 +1,24 @@
 # CARER-Net
 
-Official research code and reproducibility artifacts for **CARER-Net: Color Adaptation and Residual Error Refinement for Retinal Vessel Segmentation**.
+Research code and reproducibility artifacts for **CARER-Net: Bounded Residual Color Adaptation for Retinal Vessel Segmentation**.
 
-The default model reported in the manuscript is **CARER-Core** (`color_detail_only_unet`). It learns a zero-initialized, bounded correction to the grayscale input of a GroupNorm residual-attention U-Net from RGB and local green-channel contrast. `carer_unet` additionally enables the optional signed error refiner; the manuscript does not present this extension as the default because its benefit was small and dataset-dependent.
+The default model is **CARER-Core** (`color_detail_only_unet`). It learns a zero-initialized, bounded correction to the grayscale input of a GroupNorm residual-attention U-Net from RGB and local green-channel contrast. `carer_unet` enables the optional error-supervised dual-branch refiner evaluated in the supplementary material.
+
+## Current manuscript version
+
+Version 1.1.0 adds all five FIVES color controls, structural-analysis code, a CSV-only statistical reproduction command, and the 19 numerical tables accompanying the JMBE manuscript. The adapter adds 1,201 parameters to the 32,778,789-parameter backbone. FIVES mean Dice is 0.898350 for Core, 0.898092 for linear RGB projection, and 0.886644 for the continued grayscale control. Core-minus-projection thin-centerline recall is +0.00343; its four-endpoint-adjusted 98.75% crossed-bootstrap interval is [0.00078, 0.00617].
 
 ## Repository contents
 
 - `models/`: CARER-Core, CARER-Refine, the GroupNorm backbone, and implemented comparison models.
-- `train.py`, `train_carer_ablation.py`: baseline training and compute-matched CARER training.
+- `train.py`, `train_carer_ablation.py`: backbone training and 30-pass input-adaptation experiments.
 - `test.py`, `evaluation.py`: fixed-threshold testing and metric implementation.
 - `evaluate_robustness.py`, `analyze_probability_calibration.py`, `benchmark_jiim_models.py`: robustness, calibration, and efficiency audits.
 - `splits/`: the recorded train/validation membership lists used in the reported experiments.
 - `results/`: aggregate and per-image numerical outputs used to prepare the manuscript tables. No fundus photographs or ground-truth masks are redistributed.
 - `docs/`: dataset preparation and reproduction instructions.
+- `analysis/`: vascular structural metrics, crossed-bootstrap analysis, and the separate architecture benchmark.
+- `results/jmbe_tables/`: all 19 manuscript CSV tables, including the projection comparison.
 
 ## Installation
 
@@ -68,6 +74,8 @@ python train_carer_ablation.py \
   --warmup-epochs 5 \
   --head-learning-rate 0.0001 \
   --tail-learning-rate 0.00001 \
+  --run-root runs \
+  --weight-dir weight_files \
   --base-loss-weight 0.25 \
   --error-loss-weight 0.10 \
   --train-seed 42 \
@@ -90,7 +98,15 @@ python test.py \
   --device cuda
 ```
 
-The complete Windows/RTX 4070 workflows used for the multi-dataset confirmation, external validation, robustness, calibration, and efficiency experiments are provided as `run_*.ps1`. See [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) before running them.
+The Windows/RTX 4070 workflows for the multi-dataset confirmation, external validation, robustness, calibration, and efficiency experiments are provided as `run_*.ps1`. See [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) and the current [`JMBE reproduction guide`](docs/JMBE_REPRODUCTION.md) for paths and the five additional color-control commands.
+
+Reproduce the projection-comparison statistics from the included per-image table, without downloading images or training models:
+
+```bash
+python analysis/reproduce_projection_statistics.py
+```
+
+The command checks every reproduced mean and interval against the released table and writes a separate CSV under `artifacts/`.
 
 ## Reproducibility notes
 
@@ -99,11 +115,13 @@ The complete Windows/RTX 4070 workflows used for the multi-dataset confirmation,
 - Test threshold: `0.5`, fixed before official-test evaluation.
 - Model selection: validation soft Dice.
 - Batch size: `1`.
-- The published results are descriptive for the recorded datasets, splits, implementations, and hardware. They are not a claim of universal state-of-the-art performance.
+- Trainable input modules receive 5 module-only and 25 tail-update epochs; fixed-input arms receive 30 tail-update epochs.
+- The conventional dataset copies contain replicated grayscale inputs; FIVES retains native RGB.
+- The FIVES benchmark was used during development and final evaluation. Structural Core--projection comparisons were performed after training using saved masks.
 
 ## Checkpoints
 
-Model checkpoints are intentionally omitted from the Git repository because of their size. The code, recorded splits, configurations, and numerical outputs are included. Checkpoints can be attached to a GitHub Release or an archival repository later, with SHA-256 hashes recorded in the release notes.
+The repository includes code, recorded splits, and numerical outputs. Train checkpoints locally using the supplied commands; existing checkpoint hashes are included in the result manifests.
 
 ## License
 

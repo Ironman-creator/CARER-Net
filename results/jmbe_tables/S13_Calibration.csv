@@ -1,0 +1,11 @@
+﻿dataset,model,metric,seed_mean,seed_std,n_seeds
+FIVES,gray_rgb_control_30_unet,foreground_ece,0.011604162597745318,0.00011693602457110256,3
+FIVES,gray_rgb_control_30_unet,brier_score,0.014829106268825734,0.0001653121213729701,3
+FIVES,gray_rgb_control_30_unet,entropy_error_spearman,-0.055320903767937,0.04849910911527378,3
+FIVES,gray_rgb_control_30_unet,failure_detection_auroc,0.30648888888888887,0.008949570649747092,3
+FIVES,gray_rgb_control_30_unet,aurc,0.16236449704258005,0.0009791678915508743,3
+FIVES,color_detail_only_unet,foreground_ece,0.010003014189913765,0.0003426701288424101,3
+FIVES,color_detail_only_unet,brier_score,0.01299263981030519,0.00032575429809826654,3
+FIVES,color_detail_only_unet,entropy_error_spearman,-0.05190256702764198,0.05256819870055392,3
+FIVES,color_detail_only_unet,failure_detection_auroc,0.3485777777777778,0.0038926331181595294,3
+FIVES,color_detail_only_unet,aurc,0.15612740020076024,0.0026003869305731364,3

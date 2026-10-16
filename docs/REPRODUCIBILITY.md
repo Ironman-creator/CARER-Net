@@ -12,7 +12,7 @@ The reported experiments use:
 - a fixed test threshold of `0.5`;
 - recorded train/validation membership lists in `splits/`.
 
-CARER-Core is `color_detail_only_unet`. The epoch-matched control is `gray_rgb_control_30_unet`. `carer_unet` adds the optional signed refiner.
+CARER-Core is `color_detail_only_unet`. The epoch-matched control is `gray_rgb_control_30_unet`. `carer_unet` adds the optional error-supervised dual-branch refiner. The current manuscript's five additional input controls and projection-comparison analysis are documented in `JMBE_REPRODUCTION.md`.
 
 ## Recommended order
 

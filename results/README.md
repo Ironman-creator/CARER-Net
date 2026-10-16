@@ -11,5 +11,6 @@ These directories contain the CSV and JSON artifacts used to audit the manuscrip
 - `external_validation/`: zero-shot cross-dataset evaluation and calibration audit.
 - `robustness/`: fixed perturbation evaluation.
 - `efficiency/`: parameter, MAC, memory, latency, and throughput measurements.
+- `jmbe_tables/`: the 19 CSV tables accompanying the current JMBE manuscript, including the color controls and paired Core--projection structural comparison.
 
 The outputs are preserved as generated. Per-image files contain public dataset sample identifiers and numerical metrics, not fundus images, masks, patient identifiers, or model weights.

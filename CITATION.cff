@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite the accompanying article."
-title: "CARER-Net: Color Adaptation and Residual Error Refinement for Retinal Vessel Segmentation"
+title: "CARER-Net: Bounded Residual Color Adaptation for Retinal Vessel Segmentation"
 type: software
 authors:
   - family-names: Chen
@@ -11,7 +11,7 @@ contact:
     given-names: Zijian
     email: mrchan717829@foxmail.com
 license: MIT
-version: 1.0.0
-date-released: 2026-10-01
+version: 1.1.0
+date-released: 2026-10-16
 repository-code: "https://github.com/Ironman-creator/CARER-Net"
 url: "https://github.com/Ironman-creator/CARER-Net"
